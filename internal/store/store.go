@@ -122,6 +122,25 @@ func (s *Store) migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE IF NOT EXISTS scan_projects (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS scan_pages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id INTEGER NOT NULL,
+			position INTEGER NOT NULL,
+			original_path TEXT NOT NULL,
+			edited_path TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			FOREIGN KEY(project_id) REFERENCES scan_projects(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS scan_projects_user_updated_idx ON scan_projects(user_id, updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS scan_pages_project_position_idx ON scan_pages(project_id, position)`,
 	}
 
 	for _, stmt := range stmts {
