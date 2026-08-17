@@ -51,6 +51,12 @@
 - **打印选项**：份数、单双面、彩色/黑白、纸张大小、纸张类型、页面方向、页码范围、缩放、镜像打印
 - **实时预览**：支持 PDF 预览、纸张方向的可视化预览、页数估算
 
+### 扫描能力
+
+- **USB 扫描**：通过 SANE `scanimage` 检测扫描仪，支持彩色、灰度、黑白和 75–600 DPI；扫描仪列表带短期缓存，刷新设备时可强制重新发现。
+- **多格式预览**：可选择 PDF 或 PNG；PDF 内嵌预览，PNG 支持 ViewerJS 放大预览。
+- **安全输出**：扫描结果即时回传浏览器，不写入打印记录或持久化上传目录。
+
 ### 打印机驱动
 
 镜像内预装了 Debian `printer-driver-all` 等通用驱动包，覆盖大部分常见打印机。对于特定品牌打印机，提供**按需手动安装**的驱动脚本和 Web 管理界面：
@@ -276,6 +282,7 @@ docker exec cups driver-install canon-ufr2
 > - **驱动管理页面用不了**：驱动的安装 / 卸载脚本（`driver-install` 等）和持久化目录 `/opt/cups-drivers` 是**镜像内置**的。裸二进制环境下这些文件不存在，「驱动」页面里所有驱动都会显示为未安装、「安装」按钮被禁用并提示「当前镜像缺少该驱动的安装脚本」；如果强行调用接口，任务会以 `no such file or directory` 失败。请直接用宿主机的包管理器（`apt install printer-driver-*`）或 CUPS 管理界面装驱动。
 > - **自动检测打印机**依赖 `lpinfo`（`cups-client` 包），缺失时「扫描打印机」会报 `failed to detect printers`。
 > - **Office / OFD / PDF 标准化**依赖 LibreOffice、Java、Ghostscript，需要自行安装（见下文）。
+> - **扫描页面**依赖 SANE 的 `scanimage` 与对应设备后端。Debian 可安装 `sane-utils`，HP 一体机还需要 `hplip`；先用 `scanimage -L` 确认设备可见。
 
 ### 1. 下载二进制
 
@@ -313,7 +320,7 @@ export LISTEN_ADDR=:8080
 ./cups-web-linux-amd64 -addr :8080
 ```
 
-> ⚠️ **OFD 打印仅在 Docker 镜像中开箱即用**。二进制部署若需支持 OFD，需要另行安装 Java 运行时（镜像内为 Java 21）并把 `ofd-converter.jar` 放到 `/ofd-converter.jar`（或手动改源码中的路径）。
+> ⚠️ **OFD 打印仅在 Docker 镜像中开箱即用**。二进制部署若需支持 OFD，需要安装 Java 运行时（镜像内为 Java 21），构建 `ofd-converter` 并把 JAR 放到 `/ofd-converter.jar`，或通过 `OFD_CONVERTER_JAR` 指定实际路径。
 
 ### 3. 访问 Web
 

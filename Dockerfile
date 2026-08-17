@@ -195,6 +195,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       hpijs-ppds \
       hp-ppd \
       hplip \
+      # ── 扫描（SANE CLI，Web 扫描接口调用 scanimage） ──
+      sane-utils \
       avahi-daemon \
       dbus \
       # ── 通用工具（驱动安装脚本需要） ──

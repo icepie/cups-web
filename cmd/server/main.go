@@ -108,6 +108,8 @@ func main() {
 	protected.HandleFunc("/print-records/{id:[0-9]+}/file", printRecordFileHandler).Methods("GET")
 	protected.HandleFunc("/print-records/{id:[0-9]+}/reprint", reprintHandler).Methods("POST")
 	protected.HandleFunc("/printer-info", printerInfoHandler).Methods("GET")
+	protected.HandleFunc("/scanners", scannersHandler).Methods("GET")
+	protected.HandleFunc("/scan", scanHandler).Methods("POST")
 
 	admin := api.PathPrefix("/admin").Subrouter()
 	admin.Use(middleware.RequireSession)

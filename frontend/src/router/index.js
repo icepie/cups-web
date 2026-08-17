@@ -2,11 +2,13 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import LoginView from '../views/LoginView.vue'
 import PrintView from '../views/PrintView.vue'
 import AdminView from '../views/AdminView.vue'
+import ScanView from '../views/ScanView.vue'
 
 const routes = [
   { path: '/', redirect: '/login' },
   { path: '/login', name: 'login', component: LoginView, meta: { requiresAuth: false } },
   { path: '/print', name: 'print', component: PrintView, meta: { requiresAuth: true } },
+  { path: '/scan', name: 'scan', component: ScanView, meta: { requiresAuth: true } },
   { path: '/admin', name: 'admin', component: AdminView, meta: { requiresAuth: true, requiresAdmin: true } },
   {
     path: '/drivers',

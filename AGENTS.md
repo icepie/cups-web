@@ -39,7 +39,7 @@
 
 ### 外部依赖
 
-CUPS（IPP 通信）、LibreOffice（Office → PDF）、Java 21 + `ofd-converter.jar`（OFD → PDF）、Ghostscript（PDF 标准化）、`dpkg`/`apt-get`（运行时驱动安装）。
+CUPS（IPP 通信）、LibreOffice（Office → PDF）、Java 21 + `ofd-converter.jar`（OFD → PDF）、Ghostscript（PDF 标准化）、SANE `scanimage`（扫描仪发现与扫描）、`dpkg`/`apt-get`（运行时驱动安装）。
 
 > 各依赖的坑位说明（LibreOffice 可写 HOME、gs 字体破坏性改造、runtime 无 `dpkg-dev`）见 [docs/architecture.md](docs/architecture.md)。
 
@@ -58,6 +58,7 @@ cups-web/
 │   ├── print_handlers.go          # /api/print（主打印入口）
 │   ├── print_records_handlers.go  # 打印记录查询 / 下载 / 重打
 │   ├── printer_info_handler.go    # 打印机属性查询
+│   ├── scanner_handler.go         # /api/scanners 与 /api/scan（SANE 扫描 → PDF/PNG）
 │   ├── convert_handler.go         # /api/convert
 │   ├── convert_utils.go           # LibreOffice / OFD 转换工具
 │   ├── compose_handler.go         # /api/compose（多页拼版）
@@ -121,6 +122,8 @@ cups-web/
 | GET | `/api/print-records` | 打印记录 |
 | GET | `/api/print-records/{id}/file` | 下载原始文件 |
 | POST | `/api/print-records/{id}/reprint` | 重打参数预填 |
+| GET | `/api/scanners` | 列出 SANE 扫描仪 |
+| POST | `/api/scan` | 扫描为 PDF/PNG（`device` / `mode` / `resolution` / `output`） |
 
 ### 管理员接口（`/api/admin/*`）
 

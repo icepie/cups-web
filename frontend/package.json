@@ -15,6 +15,7 @@
     "cropperjs": "1",
     "heic2any": "^0.0.4",
     "pdfjs-dist": "^5.6.205",
+    "viewerjs": "^1.11.8",
     "vue": "^3.5.26",
     "vue-router": "latest"
   },
