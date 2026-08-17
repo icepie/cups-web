@@ -58,7 +58,7 @@ cups-web/
 │   ├── print_handlers.go          # /api/print（主打印入口）
 │   ├── print_records_handlers.go  # 打印记录查询 / 下载 / 重打
 │   ├── printer_info_handler.go    # 打印机属性查询
-│   ├── scanner_handler.go         # /api/scanners 与 /api/scan（SANE 扫描 → PDF/PNG）
+│   ├── scanner_handler.go         # /api/scanners、/api/scan 与 /api/scan/stream（SANE 扫描）
 │   ├── convert_handler.go         # /api/convert
 │   ├── convert_utils.go           # LibreOffice / OFD 转换工具
 │   ├── compose_handler.go         # /api/compose（多页拼版）
@@ -124,6 +124,7 @@ cups-web/
 | POST | `/api/print-records/{id}/reprint` | 重打参数预填 |
 | GET | `/api/scanners` | 列出 SANE 扫描仪 |
 | POST | `/api/scan` | 扫描为 PDF/PNG（`device` / `mode` / `resolution` / `output`） |
+| POST | `/api/scan/stream` | 按 PNM 扫描行实时推送预览（`device` / `mode` / `resolution`） |
 
 ### 管理员接口（`/api/admin/*`）
 

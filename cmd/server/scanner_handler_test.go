@@ -1,7 +1,13 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -96,5 +102,64 @@ func TestCachedScannersReturnsCopyWithinTTL(t *testing.T) {
 	}
 	if again[0].Name != "Test Scanner" {
 		t.Fatalf("cached scanners were mutated: %#v", again)
+	}
+}
+
+func TestReadPNMHeader(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want pnmHeader
+	}{
+		{
+			name: "color with comment",
+			data: "P6\n# scanimage\n2 3\n255\n",
+			want: pnmHeader{magic: "P6", width: 2, height: 3, maxValue: 255, rowBytes: 6},
+		},
+		{
+			name: "lineart",
+			data: "P4\n9 2\n",
+			want: pnmHeader{magic: "P4", width: 9, height: 2, maxValue: 1, rowBytes: 2},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := readPNMHeader(bufio.NewReader(bytes.NewBufferString(tt.data)))
+			if err != nil {
+				t.Fatalf("readPNMHeader() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("readPNMHeader() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStreamScanForwardsPNMRows(t *testing.T) {
+	dir := t.TempDir()
+	scanimage := filepath.Join(dir, "scanimage")
+	if err := os.WriteFile(scanimage, []byte("#!/bin/sh\nprintf 'P6\\n2 1\\n255\\n\\001\\002\\003\\004\\005\\006'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+
+	recorder := httptest.NewRecorder()
+	if err := streamScan(context.Background(), recorder, scanRequest{Device: "test", Mode: "Color", Resolution: 75}); err != nil {
+		t.Fatalf("streamScan() error = %v", err)
+	}
+	parts := bytes.SplitN(recorder.Body.Bytes(), []byte{'\n'}, 2)
+	if len(parts) != 2 {
+		t.Fatalf("stream body = %q, want metadata plus pixels", recorder.Body.Bytes())
+	}
+	var header scanStreamHeader
+	if err := json.Unmarshal(parts[0], &header); err != nil {
+		t.Fatalf("stream metadata = %q: %v", parts[0], err)
+	}
+	wantHeader := scanStreamHeader{Magic: "P6", Width: 2, Height: 1, MaxValue: 255, RowBytes: 6}
+	if header != wantHeader {
+		t.Fatalf("stream metadata = %#v, want %#v", header, wantHeader)
+	}
+	if want := []byte{1, 2, 3, 4, 5, 6}; !bytes.Equal(parts[1], want) {
+		t.Fatalf("stream pixels = %v, want %v", parts[1], want)
 	}
 }

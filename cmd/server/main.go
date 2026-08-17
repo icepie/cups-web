@@ -110,6 +110,7 @@ func main() {
 	protected.HandleFunc("/printer-info", printerInfoHandler).Methods("GET")
 	protected.HandleFunc("/scanners", scannersHandler).Methods("GET")
 	protected.HandleFunc("/scan", scanHandler).Methods("POST")
+	protected.HandleFunc("/scan/stream", scanStreamHandler).Methods("POST")
 
 	admin := api.PathPrefix("/admin").Subrouter()
 	admin.Use(middleware.RequireSession)
