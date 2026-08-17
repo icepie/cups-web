@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -161,5 +163,38 @@ func TestStreamScanForwardsPNMRows(t *testing.T) {
 	}
 	if want := []byte{1, 2, 3, 4, 5, 6}; !bytes.Equal(parts[1], want) {
 		t.Fatalf("stream pixels = %v, want %v", parts[1], want)
+	}
+}
+
+func TestScanStreamHandlerReturnsErrorBeforeStreamStarts(t *testing.T) {
+	dir := t.TempDir()
+	scanimage := filepath.Join(dir, "scanimage")
+	if err := os.WriteFile(scanimage, []byte("#!/bin/sh\nprintf 'scanner busy' >&2\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+
+	scannerDiscoveryCache.Lock()
+	previousScanners := cloneScanners(scannerDiscoveryCache.scanners)
+	previousFetchedAt := scannerDiscoveryCache.fetchedAt
+	scannerDiscoveryCache.scanners = []scannerInfo{{ID: "test", Name: "Test Scanner"}}
+	scannerDiscoveryCache.fetchedAt = time.Now()
+	scannerDiscoveryCache.Unlock()
+	t.Cleanup(func() {
+		scannerDiscoveryCache.Lock()
+		scannerDiscoveryCache.scanners = previousScanners
+		scannerDiscoveryCache.fetchedAt = previousFetchedAt
+		scannerDiscoveryCache.Unlock()
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/api/scan/stream", strings.NewReader(`{"device":"test","mode":"Color","resolution":75}`))
+	recorder := httptest.NewRecorder()
+	scanStreamHandler(recorder, request)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d; body = %q", recorder.Code, http.StatusInternalServerError, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "scanner busy") {
+		t.Fatalf("error body = %q, want scanner detail", recorder.Body.String())
 	}
 }

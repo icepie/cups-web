@@ -134,10 +134,9 @@ func scanStreamHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), scannerScanTimeout)
 	defer cancel()
-	if err := streamScan(ctx, w, req); err != nil && r.Context().Err() == nil {
-		// Header/body errors may already have reached the client. The useful
-		// diagnostic is retained in the server log by the caller's access log.
-		return
+	streamWriter := &trackingResponseWriter{ResponseWriter: w}
+	if err := streamScan(ctx, streamWriter, req); err != nil && r.Context().Err() == nil && !streamWriter.wroteHeader {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 	}
 }
 
@@ -303,6 +302,27 @@ type scanStreamHeader struct {
 	RowBytes int    `json:"rowBytes"`
 }
 
+type trackingResponseWriter struct {
+	http.ResponseWriter
+	wroteHeader bool
+}
+
+func (w *trackingResponseWriter) WriteHeader(status int) {
+	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *trackingResponseWriter) Write(data []byte) (int, error) {
+	w.wroteHeader = true
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *trackingResponseWriter) Flush() {
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 func streamScan(ctx context.Context, w http.ResponseWriter, req scanRequest) error {
 	cmd := exec.CommandContext(ctx, "scanimage",
 		"--device-name", req.Device,
@@ -324,6 +344,9 @@ func streamScan(ctx context.Context, w http.ResponseWriter, req scanRequest) err
 	if err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
+		if message := commandErrorSummary(stderr.Bytes()); message != "" {
+			return fmt.Errorf("scan failed: %s", message)
+		}
 		return fmt.Errorf("invalid scanner stream: %w", err)
 	}
 
