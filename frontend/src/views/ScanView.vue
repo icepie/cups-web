@@ -22,8 +22,9 @@
         <UButton variant="ghost" icon="i-lucide-trash-2" :disabled="!currentPage || scanning" @click="deleteSelectedPage">删除</UButton>
 
         <div class="ml-auto flex items-center gap-2 flex-wrap">
-          <UButton variant="outline" icon="i-lucide-file-down" :disabled="pages.length === 0 || scanning" @click="exportPDF">保存 PDF</UButton>
-          <UButton variant="outline" icon="i-lucide-image-down" :disabled="pages.length === 0 || scanning" @click="exportImages">导出图片</UButton>
+          <UButton variant="outline" icon="i-lucide-file-down" :loading="exporting" :disabled="pages.length === 0 || scanning || exporting" @click="exportPDF">保存 PDF</UButton>
+          <UButton v-if="exporting" color="error" variant="outline" icon="i-lucide-square" @click="cancelExport">停止导出</UButton>
+          <UButton variant="outline" icon="i-lucide-image-down" :disabled="pages.length === 0 || scanning || exporting" @click="exportImages">导出图片</UButton>
         </div>
       </div>
     </UCard>
@@ -31,6 +32,7 @@
     <UAlert v-if="error" color="error" variant="subtle" :title="error" />
     <UAlert v-if="!activeProject" color="info" variant="subtle" title="请选择或新建扫描项目" description="扫描的页面会自动保存在当前项目，可随时从历史项目载入。" />
     <UAlert v-if="scanning" color="info" variant="subtle" title="正在扫描" :description="scanProgressDescription" />
+    <UAlert v-else-if="exporting" color="info" variant="subtle" title="正在导出 PDF" :description="exportProgressDescription" />
     <UAlert v-else-if="loaded && scanners.length === 0" color="warning" variant="subtle" title="未检测到扫描仪" description="请检查扫描仪的 USB 连接后刷新设备。" />
 
     <div class="grid grid-cols-1 lg:grid-cols-[17rem_minmax(0,1fr)] gap-4">
@@ -59,8 +61,11 @@
             <USelect v-model="resolution" :items="resolutionItems" value-key="value" label-key="label" class="w-full" />
           </UFormField>
           <div class="border-t border-default pt-4">
-            <p class="mb-3 text-xs font-semibold text-muted">导出图片</p>
+            <p class="mb-3 text-xs font-semibold text-muted">导出设置</p>
             <div class="space-y-4">
+              <UFormField label="PDF 导出方式" :hint="exportMode === 'server' ? '后端生成，能看进度、文件更小' : '浏览器本地生成，不依赖后端'">
+                <USelect v-model="exportMode" :items="exportModeItems" value-key="value" label-key="label" class="w-full" />
+              </UFormField>
               <UFormField label="图片格式">
                 <USelect v-model="imageFormat" :items="imageFormatItems" value-key="value" label-key="label" class="w-full" />
               </UFormField>
@@ -69,7 +74,7 @@
               </UFormField>
             </div>
           </div>
-          <p class="text-xs text-muted leading-5">每次扫描会追加到文档末尾。PDF 保留全部页面；格式与质量仅作用于「导出图片」。</p>
+          <p class="text-xs text-muted leading-5">每次扫描会追加到文档末尾。格式与质量同时作用于「保存 PDF」与「导出图片」。</p>
         </div>
       </UCard>
 
@@ -207,6 +212,13 @@ const editorImage = ref(null)
 const scanRows = ref(0)
 const scanHeight = ref(0)
 const scanElapsedSeconds = ref(0)
+const exporting = ref(false)
+const exportProgress = ref(null)
+const exportMode = ref('server')
+const exportModeItems = [
+  { label: '后端导出（推荐，可看进度）', value: 'server' },
+  { label: '浏览器本地导出', value: 'client' }
+]
 
 const zoomPercent = ref(100)
 const modeItems = [
@@ -228,10 +240,17 @@ const scanProgressDescription = computed(() => {
   const rows = scanHeight.value ? `${scanRows.value}/${scanHeight.value} 行` : '正在读取扫描尺寸'
   return `${rows}，已用时 ${scanElapsedSeconds.value} 秒。`
 })
+const exportProgressDescription = computed(() => {
+  const progress = exportProgress.value
+  if (!progress) return '正在准备导出…'
+  if (!progress.total) return '正在处理页面…'
+  return `已处理 ${progress.current}/${progress.total} 页（${progress.percent}%）。`
+})
 
 let cropper
 let scanTimer
 let scanAbortController
+let exportAbortController
 
 
 function startScanTimer() {
@@ -757,34 +776,156 @@ async function exportImages() {
   }
 }
 
+function exportFilename() {
+  const name = (activeProject.value?.name || 'scans').trim()
+  const safe = name.replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 80) || 'scans'
+  return `${safe}.pdf`
+}
+
+function checkExportAbort() {
+  if (exportAbortController?.signal.aborted) {
+    const err = new Error('导出已取消')
+    err.name = 'AbortError'
+    throw err
+  }
+}
+
+// 让出主线程一帧，浏览器得以重绘进度条并响应「停止导出」；同时检查取消状态。
+async function yieldToUI() {
+  await new Promise(resolve => setTimeout(resolve, 0))
+  checkExportAbort()
+}
+
+// 解析后端「JSON 事件行 + PDF 字节」流：progress 事件回调进度，ready 后按 size 读字节。
+async function readPDFStream(response, onProgress) {
+  const reader = response.body?.getReader()
+  if (!reader) throw new Error('浏览器不支持导出流')
+  const decoder = new TextDecoder()
+  let pending = new Uint8Array(0)
+
+  async function pull() {
+    const { value, done } = await reader.read()
+    if (done) throw new Error('导出在完成前中断')
+    const merged = new Uint8Array(pending.length + value.length)
+    merged.set(pending)
+    merged.set(value, pending.length)
+    pending = merged
+  }
+
+  async function line() {
+    while (true) {
+      const end = pending.indexOf(10)
+      if (end >= 0) {
+        const text = decoder.decode(pending.subarray(0, end))
+        pending = pending.subarray(end + 1)
+        return text
+      }
+      await pull()
+    }
+  }
+
+  async function bytes(length) {
+    while (pending.length < length) await pull()
+    const result = pending.subarray(0, length)
+    pending = pending.subarray(length)
+    return result
+  }
+
+  while (true) {
+    checkExportAbort()
+    const text = await line()
+    if (!text) continue
+    const event = JSON.parse(text)
+    if (event.type === 'progress') {
+      onProgress?.(event)
+    } else if (event.type === 'error') {
+      throw new Error(event.message || '导出失败')
+    } else if (event.type === 'ready') {
+      return new Blob([await bytes(event.size)], { type: 'application/pdf' })
+    }
+  }
+}
+
 async function exportPDF() {
+  if (exporting.value) return
   try {
     await commitCurrentEditor()
-    const document = await PDFDocument.create()
-    const [pageWidth, pageHeight] = [595.28, 841.89]
-    const margin = 18
-    for (const scanPage of pages.value) {
-      const image = await document.embedPng(await scanPage.blob.arrayBuffer())
-      const page = document.addPage([pageWidth, pageHeight])
-      const scale = Math.min((pageWidth - margin * 2) / image.width, (pageHeight - margin * 2) / image.height)
-      const width = image.width * scale
-      const height = image.height * scale
-      page.drawImage(image, {
-        x: (pageWidth - width) / 2,
-        y: (pageHeight - height) / 2,
-        width,
-        height
-      })
+    exporting.value = true
+    exportProgress.value = { current: 0, total: pages.value.length, percent: 0 }
+    exportAbortController = new AbortController()
+    if (exportMode.value === 'client') {
+      await exportPDFClient()
+    } else {
+      await exportPDFServer()
     }
-    triggerDownload(await document.saveAsBase64({ dataUri: true }), 'scans.pdf')
   } catch (err) {
-    error.value = err.message || '导出 PDF 失败'
+    if (err.name !== 'AbortError') error.value = err.message || '导出 PDF 失败'
+  } finally {
+    exportAbortController = undefined
+    exporting.value = false
+    exportProgress.value = null
   }
+}
+
+async function exportPDFServer() {
+  const response = await apiFetch(`/api/scan-projects/${activeProject.value.id}/export-pdf`, {
+    method: 'POST',
+    signal: exportAbortController.signal,
+    body: JSON.stringify({ imageFormat: imageFormat.value, quality: Math.round(imageQuality.value * 100) })
+  })
+  if (!response.ok) throw new Error(await readError(response))
+  const blob = await readPDFStream(response, (event) => {
+    exportProgress.value = { current: event.current, total: event.total, percent: event.percent }
+  })
+  downloadBlob(blob, exportFilename())
+}
+
+// 浏览器本地导出（pdf-lib）。逐页在事件循环间让出主线程，避免大文档时页面卡死；
+// 每页之间检查取消标志，可随时「停止导出」。
+async function exportPDFClient() {
+  const document = await PDFDocument.create()
+  const [pageWidth, pageHeight] = [595.28, 841.89]
+  const margin = 18
+  const useJPEG = imageFormat.value === 'jpeg'
+  const total = pages.value.length
+  for (let index = 0; index < total; index++) {
+    checkExportAbort()
+    const scanPage = pages.value[index]
+    let image
+    if (useJPEG) {
+      const jpegBlob = await pageToBlob(scanPage, 'image/jpeg')
+      image = await document.embedJpg(await jpegBlob.arrayBuffer())
+    } else {
+      image = await document.embedPng(await scanPage.blob.arrayBuffer())
+    }
+    const page = document.addPage([pageWidth, pageHeight])
+    const scale = Math.min((pageWidth - margin * 2) / image.width, (pageHeight - margin * 2) / image.height)
+    const width = image.width * scale
+    const height = image.height * scale
+    page.drawImage(image, {
+      x: (pageWidth - width) / 2,
+      y: (pageHeight - height) / 2,
+      width,
+      height
+    })
+    exportProgress.value = { current: index + 1, total, percent: Math.round((index + 1) / total * 100) }
+    await yieldToUI()
+  }
+  checkExportAbort()
+  const base64 = await document.saveAsBase64({ dataUri: true })
+  triggerDownload(base64, exportFilename())
+}
+
+function cancelExport() {
+  exportAbortController?.abort()
 }
 
 function handleKeydown(event) {
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
-  if (event.key === 'Escape') cancelScan()
+  if (event.key === 'Escape') {
+    if (exporting.value) cancelExport()
+    else cancelScan()
+  }
   if (event.key === '[') rotate(-90)
   if (event.key === ']') rotate(90)
   if (event.key === 'Delete') deleteSelectedPage()
@@ -801,6 +942,7 @@ onMounted(() => {
 })
 onUnmounted(() => {
   cancelScan()
+  cancelExport()
   stopScanTimer()
   clearPages()
   window.removeEventListener('keydown', handleKeydown)

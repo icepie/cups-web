@@ -121,6 +121,7 @@ func main() {
 	protected.HandleFunc("/scan-projects/{projectId:[0-9]+}/pages/{pageId:[0-9]+}", deleteScanPageHandler).Methods("DELETE")
 	protected.HandleFunc("/scan-projects/{projectId:[0-9]+}/pages/{pageId:[0-9]+}/reset", resetScanPageHandler).Methods("DELETE")
 	protected.HandleFunc("/scan-projects/{projectId:[0-9]+}/pages/{pageId:[0-9]+}/file", scanPageFileHandler).Methods("GET")
+	protected.HandleFunc("/scan-projects/{projectId:[0-9]+}/export-pdf", exportScanPDFHandler).Methods("POST")
 
 	admin := api.PathPrefix("/admin").Subrouter()
 	admin.Use(middleware.RequireSession)
